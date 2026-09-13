@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+"""Productivity unit tracker.
+
+A "unit" is one task scoped to ~1 hour of relaxed effort. It might take
+25 minutes or 90 minutes in practice -- the unit measures scope, not a
+clock. Log completed units with a category and a short note; the tool
+tallies daily/weekly totals against the goalposts:
+
+    8 units  = a good day
+    16+      = an incredible day
+"""
+import argparse
+import csv
+import sys
+from collections import defaultdict
+from datetime import date, datetime, timedelta
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+LOGS = ROOT / "logs"
+FIELDS = ["time", "category", "note", "units"]
+
+GOOD_DAY = 8
+INCREDIBLE_DAY = 16
+
+
+def log_path(d: date) -> Path:
+    return LOGS / f"{d.isoformat()}.csv"
+
+
+def read_day(d: date):
+    p = log_path(d)
+    if not p.exists():
+        return []
+    with p.open(newline="") as f:
+        return list(csv.DictReader(f))
+
+
+def write_day(d: date, rows):
+    p = log_path(d)
+    with p.open("w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=FIELDS)
+        w.writeheader()
+        w.writerows(rows)
+
+
+def day_total(rows):
+    return sum(float(r["units"]) for r in rows)
+
+
+def rating_for(total):
+    if total >= INCREDIBLE_DAY:
+        return "incredible day"
+    if total >= GOOD_DAY:
+        return "good day"
+    return "keep going"
+
+
+def cmd_add(args):
+    LOGS.mkdir(exist_ok=True)
+    today = date.today()
+    rows = read_day(today)
+    rows.append({
+        "time": datetime.now().strftime("%H:%M"),
+        "category": args.category,
+        "note": args.note or "",
+        "units": args.units,
+    })
+    write_day(today, rows)
+    total = day_total(rows)
+    print(f"+{args.units:g} unit  {args.category}: {args.note or ''}".rstrip())
+    print(f"today: {total:g} units ({rating_for(total)})")
+
+
+def cmd_undo(args):
+    today = date.today()
+    rows = read_day(today)
+    if not rows:
+        print("no entries logged today")
+        return
+    removed = rows.pop()
+    write_day(today, rows)
+    total = day_total(rows)
+    print(f"removed: {removed['category']}: {removed['note']} (+{removed['units']})")
+    print(f"today: {total:g} units ({rating_for(total)})")
+
+
+def cmd_today(args):
+    today = date.today()
+    rows = read_day(today)
+    if not rows:
+        print("nothing logged today yet")
+        return
+    for r in rows:
+        note = f" — {r['note']}" if r["note"] else ""
+        print(f"  {r['time']}  [{r['category']}] {float(r['units']):g}u{note}")
+    total = day_total(rows)
+    print(f"\ntotal: {total:g} units ({rating_for(total)})")
+
+
+def cmd_report(args):
+    end = date.today()
+    start = end - timedelta(days=args.days - 1)
+    print(f"report: {start.isoformat()} to {end.isoformat()}")
+    print()
+
+    by_cat = defaultdict(float)
+    day_totals = {}
+    d = start
+    while d <= end:
+        rows = read_day(d)
+        total = day_total(rows)
+        day_totals[d] = total
+        for r in rows:
+            by_cat[r["category"]] += float(r["units"])
+        d += timedelta(days=1)
+
+    for d in sorted(day_totals):
+        total = day_totals[d]
+        bar = "#" * int(total)
+        print(f"  {d.isoformat()} ({d.strftime('%a')})  {total:5.1f}u  {bar}  {rating_for(total)}")
+
+    n_days = len(day_totals)
+    grand_total = sum(day_totals.values())
+    good_days = sum(1 for t in day_totals.values() if t >= GOOD_DAY)
+    print()
+    print(f"total: {grand_total:g} units over {n_days} days ({grand_total / n_days:.1f}/day avg)")
+    print(f"good-or-better days: {good_days}/{n_days}")
+
+    if by_cat:
+        print()
+        print("by category:")
+        for cat, total in sorted(by_cat.items(), key=lambda kv: -kv[1]):
+            print(f"  {cat}: {total:g}u")
+
+    # current streak of good-or-better days, walking back from today
+    streak = 0
+    d = end
+    while True:
+        rows = read_day(d)
+        if day_total(rows) >= GOOD_DAY:
+            streak += 1
+            d -= timedelta(days=1)
+        else:
+            break
+    print()
+    print(f"current streak (>= {GOOD_DAY}u days): {streak}")
+
+
+def cmd_categories(args):
+    if not LOGS.exists():
+        print("no logs yet")
+        return
+    by_cat = defaultdict(float)
+    counts = defaultdict(int)
+    for p in sorted(LOGS.glob("*.csv")):
+        with p.open(newline="") as f:
+            for r in csv.DictReader(f):
+                by_cat[r["category"]] += float(r["units"])
+                counts[r["category"]] += 1
+    if not by_cat:
+        print("no logs yet")
+        return
+    print("all-time by category:")
+    for cat, total in sorted(by_cat.items(), key=lambda kv: -kv[1]):
+        print(f"  {cat}: {total:g}u across {counts[cat]} tasks")
+
+
+def main():
+    p = argparse.ArgumentParser(prog="track", description="Log completed effort units and track productivity.")
+    sub = p.add_subparsers(dest="command", required=True)
+
+    p_add = sub.add_parser("add", help="log a completed task")
+    p_add.add_argument("category", help="e.g. laundromat-work, fundraiser, surveillance-system")
+    p_add.add_argument("note", nargs="?", default="", help="short description")
+    p_add.add_argument("-u", "--units", type=float, default=1.0, help="units completed (default 1)")
+    p_add.set_defaults(func=cmd_add)
+
+    p_undo = sub.add_parser("undo", help="remove the last entry logged today")
+    p_undo.set_defaults(func=cmd_undo)
+
+    p_today = sub.add_parser("today", help="show today's log and total")
+    p_today.set_defaults(func=cmd_today)
+
+    p_report = sub.add_parser("report", help="summarize a range of days")
+    p_report.add_argument("-d", "--days", type=int, default=7, help="how many days back, including today (default 7)")
+    p_report.set_defaults(func=cmd_report)
+
+    p_cat = sub.add_parser("categories", help="all-time totals by category")
+    p_cat.set_defaults(func=cmd_categories)
+
+    args = p.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
