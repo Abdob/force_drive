@@ -3,3 +3,7 @@ time,category,note,units
 12:12,surveillance-system,R1 sep1-4,1.0
 12:12,surveillance-system,R1 sep5-8,1.0
 13:06,fundraiser,tracking for week of 9/6,1.0
+22:07,surveillance-system,replaced PoE source in R1 to dongle pair,1.0
+22:07,surveillance-system,replaced R1 streaming from vaapi to deepstream,1.0
+22:08,laundromat,"fixed dryer charing without working, card-reader",1.0
+22:08,laundromat,customer assitance X2,1.0
