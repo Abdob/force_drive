@@ -3,3 +3,5 @@ time,category,note,units
 22:54,laundromat,"vending machine loaded, relay to vending half way",1.0
 22:54,laundromat,Cleaning laundromat,1.0
 22:56,laundromat,Maintanence on H18 R8 dryer,1.0
+23:59,laundromat,SMS code autoentry,2.0
+23:59,surveillance-system,R2 to 9/13,1.0
